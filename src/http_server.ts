@@ -1,17 +1,25 @@
+/**
+ * Combined HTTP server for places-mcp:
+ *   - REST on LISTEN_PORT (default 32610)
+ *   - MCP Streamable-HTTP on MCP_PORT (default 33610, /mcp)
+ *
+ * Env:
+ *   LISTEN_PORT / MCP_PORT      ports
+ *   LISTEN_HOST                 default 0.0.0.0 (legacy HTTP_HOST honored)
+ *   GOOGLE_PLACES_API_KEY       required
+ *   DEFAULT_LAT / DEFAULT_LNG   optional location bias
+ */
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import {
-  searchText,
-  searchNearby,
-  getPlaceDetails,
-  autocomplete,
-} from "./places-client.js";
-import { computeRoute, type TravelMode } from "./tools/routes.js";
-import { computeRouteWeather } from "./tools/route-weather.js";
+import { randomUUID } from "node:crypto";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { RateLimiter, loadRateLimitConfig } from "./rate-limiter.js";
+import { registerTools, buildRestHandlers, type ToolsContext } from "./tools.js";
 
-const VERSION = "0.1.0";
-const PORT = parseInt(process.env.HTTP_PORT ?? "8203", 10);
-const HOST = process.env.HTTP_HOST ?? "0.0.0.0";
+const VERSION = "0.2.0";
+const REST_PORT = Number(process.env.LISTEN_PORT ?? process.env.HTTP_PORT ?? 32610);
+const MCP_PORT = Number(process.env.MCP_PORT ?? 33610);
+const HOST = process.env.LISTEN_HOST ?? process.env.HTTP_HOST ?? "0.0.0.0";
 
 function loadApiKey(): string {
   const key = process.env.GOOGLE_PLACES_API_KEY;
@@ -22,160 +30,150 @@ function loadApiKey(): string {
   return key;
 }
 
-const apiKey = loadApiKey();
-const limiter = new RateLimiter(loadRateLimitConfig());
-
-const defaultLat = parseFloat(process.env.DEFAULT_LAT ?? "0");
-const defaultLng = parseFloat(process.env.DEFAULT_LNG ?? "0");
-const hasDefaultLocation = defaultLat !== 0 && defaultLng !== 0;
-
-type Handler = (body: any) => Promise<any>;
-
-const tools: Record<string, Handler> = {
-  search_places: async (b) => {
-    limiter.check();
-    const query = String(b.query ?? "");
-    if (!query) throw new Error("query required");
-    const lat = b.near_lat ?? (hasDefaultLocation ? defaultLat : undefined);
-    const lng = b.near_lng ?? (hasDefaultLocation ? defaultLng : undefined);
-    const location =
-      lat !== undefined && lng !== undefined
-        ? { latitude: lat, longitude: lng }
-        : undefined;
-    const radius = b.radius_meters ?? 5000;
-    const max = b.max_results ?? 5;
-    return await searchText(apiKey, query, location, radius, max);
-  },
-
-  search_nearby: async (b) => {
-    limiter.check();
-    if (typeof b.latitude !== "number" || typeof b.longitude !== "number") {
-      throw new Error("latitude and longitude required");
-    }
-    const types = Array.isArray(b.types) ? b.types : [];
-    const radius = b.radius_meters ?? 1000;
-    const max = b.max_results ?? 5;
-    return await searchNearby(
-      apiKey,
-      { latitude: b.latitude, longitude: b.longitude },
-      radius,
-      types,
-      max,
-    );
-  },
-
-  get_place_details: async (b) => {
-    limiter.check();
-    if (!b.place_id) throw new Error("place_id required");
-    return await getPlaceDetails(apiKey, String(b.place_id));
-  },
-
-  autocomplete_place: async (b) => {
-    limiter.check();
-    const input = String(b.input ?? "");
-    if (!input) throw new Error("input required");
-    const lat = b.near_lat ?? (hasDefaultLocation ? defaultLat : undefined);
-    const lng = b.near_lng ?? (hasDefaultLocation ? defaultLng : undefined);
-    const location =
-      lat !== undefined && lng !== undefined
-        ? { latitude: lat, longitude: lng }
-        : undefined;
-    return await autocomplete(apiKey, input, location);
-  },
-
-  compute_route: async (b) => {
-    limiter.check();
-    if (!b.origin || !b.destination) throw new Error("origin and destination required");
-    const mode = (b.mode ?? "DRIVE") as TravelMode;
-    return await computeRoute(apiKey, String(b.origin), String(b.destination), mode);
-  },
-
-  get_route_weather: async (b) => {
-    limiter.check();
-    if (!b.origin || !b.destination) throw new Error("origin and destination required");
-    const mode = (b.mode ?? "DRIVE") as TravelMode;
-    const departure = b.departure_time ? new Date(b.departure_time) : new Date();
-    const interval = b.interval_minutes ?? 30;
-    const text = await computeRouteWeather(
-      apiKey,
-      String(b.origin),
-      String(b.destination),
-      mode,
-      departure,
-      interval,
-    );
-    return { text };
-  },
-
-  usage_status: async () => {
-    const s = limiter.status();
-    return {
-      ...s,
-      hourRemaining: s.hourLimit - s.hourUsed,
-      monthRemaining: s.monthLimit - s.monthUsed,
-    };
-  },
+const ctx: ToolsContext = {
+  apiKey: loadApiKey(),
+  limiter: new RateLimiter(loadRateLimitConfig()),
+  defaultLat: parseFloat(process.env.DEFAULT_LAT ?? "0"),
+  defaultLng: parseFloat(process.env.DEFAULT_LNG ?? "0"),
+  hasDefaultLocation:
+    parseFloat(process.env.DEFAULT_LAT ?? "0") !== 0 &&
+    parseFloat(process.env.DEFAULT_LNG ?? "0") !== 0,
 };
 
-function sendJson(res: ServerResponse, status: number, data: any) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(data));
+const { handlers, names: toolNames } = buildRestHandlers(ctx);
+
+// ---------------------- REST ----------------------
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  const payload = JSON.stringify(body);
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(payload),
+  });
+  res.end(payload);
 }
 
-function readBody(req: IncomingMessage): Promise<any> {
+function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString("utf-8");
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw));
-      } catch (e) {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
 
-const server = createServer(async (req, res) => {
-  const url = req.url ?? "/";
+const restServer = createServer(async (req, res) => {
   const method = req.method ?? "GET";
-
-  if (method === "GET" && url === "/health") {
-    return sendJson(res, 200, { ok: true, service: "places-mcp-http", version: VERSION });
-  }
-
-  if (method === "GET" && url === "/tools") {
-    return sendJson(res, 200, { tools: Object.keys(tools) });
-  }
-
-  if (method === "POST" && url.startsWith("/tools/")) {
-    const name = url.slice("/tools/".length).split("?")[0];
-    const handler = tools[name];
-    if (!handler) return sendJson(res, 404, { error: `unknown tool: ${name}` });
-    try {
-      const body = await readBody(req);
-      const result = await handler(body);
-      return sendJson(res, 200, { ok: true, result });
-    } catch (e: any) {
-      return sendJson(res, 400, { ok: false, error: e?.message ?? String(e) });
+  const rawUrl = req.url ?? "/";
+  const url = rawUrl.split("?")[0];
+  try {
+    if (method === "GET" && (url === "/" || url === "/health")) {
+      sendJson(res, 200, {
+        service: "places-mcp-http",
+        version: VERSION,
+        tools: toolNames,
+        mcpEndpoint: `http://${HOST}:${MCP_PORT}/mcp`,
+      });
+      return;
     }
+    if (method === "GET" && url === "/tools") {
+      sendJson(res, 200, { tools: toolNames });
+      return;
+    }
+    if (method === "POST" && url.startsWith("/tools/")) {
+      const name = url.slice("/tools/".length).split("?")[0];
+      const handler = handlers[name];
+      if (!handler) {
+        sendJson(res, 404, { ok: false, error: `Unknown tool: ${name}` });
+        return;
+      }
+      const raw = await readBody(req);
+      let args: Record<string, unknown> = {};
+      if (raw.trim().length > 0) {
+        try {
+          args = JSON.parse(raw);
+          if (typeof args !== "object" || args === null || Array.isArray(args)) {
+            throw new Error("Body must be a JSON object");
+          }
+        } catch (e) {
+          sendJson(res, 400, {
+            ok: false,
+            error: `Invalid JSON body: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          return;
+        }
+      }
+      const result = await handler(args);
+      sendJson(res, 200, { ok: true, ...result });
+      return;
+    }
+    sendJson(res, 404, { ok: false, error: "Not found", method, url });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[places-mcp-http] REST error ${method} ${url}: ${msg}\n`);
+    sendJson(res, 500, { ok: false, error: msg });
   }
-
-  sendJson(res, 404, { error: "not found" });
 });
 
-server.listen(PORT, HOST, () => {
-  process.stderr.write(
-    `[places-mcp-http] v${VERSION} listening on http://${HOST}:${PORT}\n`,
-  );
+// ---------------------- MCP Streamable-HTTP ----------------------
+
+function buildMcpServer(): McpServer {
+  const s = new McpServer({ name: "places-mcp", version: VERSION });
+  registerTools(s, ctx);
+  return s;
+}
+
+const mcpSessions = new Map<string, StreamableHTTPServerTransport>();
+
+const mcpHttpServer = createServer(async (req, res) => {
+  const url = req.url ?? "/";
+  const path = url.split("?")[0];
+  if (path !== "/mcp" && path !== "/") {
+    sendJson(res, 404, { ok: false, error: "Not found. Use /mcp for MCP Streamable-HTTP." });
+    return;
+  }
+  try {
+    const sid = (req.headers["mcp-session-id"] ?? req.headers["x-mcp-session-id"]) as string | undefined;
+    let transport = sid ? mcpSessions.get(sid) : undefined;
+    if (!transport) {
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (newSid) => {
+          mcpSessions.set(newSid, transport!);
+        },
+      });
+      transport.onclose = () => {
+        if (transport!.sessionId) mcpSessions.delete(transport!.sessionId);
+      };
+      const srv = buildMcpServer();
+      await srv.connect(transport);
+    }
+    await transport.handleRequest(req, res);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[places-mcp-http] MCP error: ${msg}\n`);
+    if (!res.headersSent) sendJson(res, 500, { ok: false, error: msg });
+  }
 });
 
-const shutdown = (sig: string) => {
-  process.stderr.write(`[places-mcp-http] shutdown (${sig})\n`);
-  server.close(() => process.exit(0));
+async function start() {
+  restServer.listen(REST_PORT, HOST, () => {
+    process.stderr.write(`[places-mcp-http] REST v${VERSION} on ${HOST}:${REST_PORT}\n`);
+  });
+  mcpHttpServer.listen(MCP_PORT, HOST, () => {
+    process.stderr.write(`[places-mcp-http] MCP  v${VERSION} on ${HOST}:${MCP_PORT}/mcp\n`);
+  });
+}
+start().catch((err) => {
+  process.stderr.write(`[places-mcp-http] Fatal: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.exit(1);
+});
+
+const shutdown = (signal: string) => {
+  process.stderr.write(`[places-mcp-http] Shutting down (${signal})...\n`);
+  restServer.close();
+  mcpHttpServer.close();
+  setTimeout(() => process.exit(0), 2000).unref();
 };
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
