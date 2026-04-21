@@ -1,6 +1,6 @@
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { homedir } from "os";
-import { dirname, join } from "path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 export interface RateLimitConfig {
   maxPerHour: number;
@@ -9,17 +9,15 @@ export interface RateLimitConfig {
 }
 
 interface UsageData {
-  hourly: Record<string, number>;   // key: "2026-02-19T10" → count
-  monthly: Record<string, number>;  // key: "2026-02"       → count
+  hourly: Record<string, number>; // key: "2026-02-19T10" → count
+  monthly: Record<string, number>; // key: "2026-02"       → count
 }
 
 export function loadRateLimitConfig(): RateLimitConfig {
   return {
-    maxPerHour: parseInt(process.env.MAX_REQUESTS_PER_HOUR ?? "60"),
-    maxPerMonth: parseInt(process.env.MAX_REQUESTS_PER_MONTH ?? "5000"),
-    usageFile:
-      process.env.USAGE_FILE ??
-      join(homedir(), ".places-mcp", "usage.json"),
+    maxPerHour: Number.parseInt(process.env.MAX_REQUESTS_PER_HOUR ?? "60"),
+    maxPerMonth: Number.parseInt(process.env.MAX_REQUESTS_PER_MONTH ?? "5000"),
+    usageFile: process.env.USAGE_FILE ?? join(homedir(), ".places-mcp", "usage.json"),
   };
 }
 
@@ -76,8 +74,8 @@ export class RateLimiter {
     const hourKey = currentHourKey();
     const monthKey = currentMonthKey();
 
-    const hourUsed = (data.hourly[hourKey] ?? 0);
-    const monthUsed = (data.monthly[monthKey] ?? 0);
+    const hourUsed = data.hourly[hourKey] ?? 0;
+    const monthUsed = data.monthly[monthKey] ?? 0;
 
     if (hourUsed >= this.config.maxPerHour) {
       throw new Error(

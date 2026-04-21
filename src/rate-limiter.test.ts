@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
-import { loadRateLimitConfig, RateLimiter, RateLimitConfig } from "./rate-limiter.js";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RateLimiter, loadRateLimitConfig } from "./rate-limiter.js";
 
 describe("loadRateLimitConfig", () => {
   const origEnv = { ...process.env };
@@ -12,8 +12,11 @@ describe("loadRateLimitConfig", () => {
   });
 
   it("returns defaults when env vars are unset", () => {
+    // biome-ignore lint/performance/noDelete: env-var unset must be `delete` — assignment sets string "undefined"
     delete process.env.MAX_REQUESTS_PER_HOUR;
+    // biome-ignore lint/performance/noDelete: env-var unset must be `delete` — assignment sets string "undefined"
     delete process.env.MAX_REQUESTS_PER_MONTH;
+    // biome-ignore lint/performance/noDelete: env-var unset must be `delete` — assignment sets string "undefined"
     delete process.env.USAGE_FILE;
     const cfg = loadRateLimitConfig();
     expect(cfg.maxPerHour).toBe(60);
