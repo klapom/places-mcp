@@ -29,16 +29,16 @@ interface Step {
 }
 
 interface SamplePoint {
-  offsetMinutes: number;       // minutes after departure
+  offsetMinutes: number; // minutes after departure
   expectedTime: Date;
   lat: number;
   lng: number;
-  label: string;               // "Start", "nach 30 Min.", "Ziel"
+  label: string; // "Start", "nach 30 Min.", "Ziel"
 }
 
 interface WeatherSnapshot {
   offsetMinutes: number;
-  timeLabel: string;           // "14:30"
+  timeLabel: string; // "14:30"
   locationLabel: string;
   temperature: number;
   condition: string;
@@ -74,11 +74,11 @@ async function fetchRouteSteps(
     throw new Error(`Routes API ${res.status}: ${err}`);
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
   const route = data.routes?.[0];
   if (!route) throw new Error("Keine Route gefunden.");
 
-  const totalSeconds = parseInt(route.duration?.replace("s", "") ?? "0");
+  const totalSeconds = Number.parseInt(route.duration?.replace("s", "") ?? "0");
   const summary =
     `${route.localizedValues?.distance?.text ?? ""}, ` +
     `${route.localizedValues?.duration?.text ?? ""}`;
@@ -86,7 +86,7 @@ async function fetchRouteSteps(
   const steps: Step[] = [];
   for (const leg of route.legs ?? []) {
     for (const step of leg.steps ?? []) {
-      const dur = parseInt(step.staticDuration?.replace("s", "") ?? "0");
+      const dur = Number.parseInt(step.staticDuration?.replace("s", "") ?? "0");
       if (!step.startLocation?.latLng || !step.endLocation?.latLng) continue;
       steps.push({
         startLat: step.startLocation.latLng.latitude,
@@ -114,12 +114,13 @@ function sampleRoute(
   const intervalSeconds = intervalMinutes * 60;
 
   // Always include departure (t=0)
-  if (steps.length > 0) {
+  const firstStep = steps[0];
+  if (firstStep) {
     points.push({
       offsetMinutes: 0,
       expectedTime: new Date(departureTime),
-      lat: steps[0].startLat,
-      lng: steps[0].startLng,
+      lat: firstStep.startLat,
+      lng: firstStep.startLng,
       label: "Start",
     });
   }
@@ -130,15 +131,14 @@ function sampleRoute(
 
   while (nextSampleAt < totalSeconds && stepIdx < steps.length) {
     const step = steps[stepIdx];
+    if (!step) break;
 
     if (cumSeconds + step.durationSeconds >= nextSampleAt) {
       // Sample point falls within this step — interpolate position
       const fraction = (nextSampleAt - cumSeconds) / step.durationSeconds;
       const lat = step.startLat + fraction * (step.endLat - step.startLat);
       const lng = step.startLng + fraction * (step.endLng - step.startLng);
-      const expectedTime = new Date(
-        departureTime.getTime() + nextSampleAt * 1000,
-      );
+      const expectedTime = new Date(departureTime.getTime() + nextSampleAt * 1000);
       const offsetMinutes = Math.round(nextSampleAt / 60);
       points.push({
         offsetMinutes,
@@ -180,13 +180,27 @@ function formatOffsetLabel(minutes: number): string {
 // ─── Open-Meteo hourly weather ────────────────────────────────────────────────
 
 const WMO: Record<number, string> = {
-  0: "☀️ Klarer Himmel", 1: "🌤️ Überwiegend klar", 2: "⛅ Teilweise bewölkt",
-  3: "☁️ Bedeckt", 45: "🌫️ Nebel", 48: "🌫️ Reifnebel",
-  51: "🌦️ Nieselregen", 53: "🌦️ Nieselregen", 55: "🌧️ Starker Nieselregen",
-  61: "🌧️ Leichter Regen", 63: "🌧️ Regen", 65: "🌧️ Starker Regen",
-  71: "🌨️ Leichter Schnee", 73: "❄️ Schneefall", 75: "❄️ Starker Schneefall",
-  80: "🌦️ Regenschauer", 81: "🌧️ Regenschauer", 82: "⛈️ Starke Schauer",
-  95: "⛈️ Gewitter", 96: "⛈️ Gewitter+Hagel", 99: "⛈️ Starkes Gewitter",
+  0: "☀️ Klarer Himmel",
+  1: "🌤️ Überwiegend klar",
+  2: "⛅ Teilweise bewölkt",
+  3: "☁️ Bedeckt",
+  45: "🌫️ Nebel",
+  48: "🌫️ Reifnebel",
+  51: "🌦️ Nieselregen",
+  53: "🌦️ Nieselregen",
+  55: "🌧️ Starker Nieselregen",
+  61: "🌧️ Leichter Regen",
+  63: "🌧️ Regen",
+  65: "🌧️ Starker Regen",
+  71: "🌨️ Leichter Schnee",
+  73: "❄️ Schneefall",
+  75: "❄️ Starker Schneefall",
+  80: "🌦️ Regenschauer",
+  81: "🌧️ Regenschauer",
+  82: "⛈️ Starke Schauer",
+  95: "⛈️ Gewitter",
+  96: "⛈️ Gewitter+Hagel",
+  99: "⛈️ Starkes Gewitter",
 };
 
 async function getWeatherAtPointAndTime(
@@ -205,12 +219,12 @@ async function getWeatherAtPointAndTime(
   const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
   if (!res.ok) throw new Error(`Open-Meteo ${res.status}`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
 
   // Find the hourly slot closest to targetTime
   const targetMs = targetTime.getTime();
   let closestIdx = 0;
-  let closestDiff = Infinity;
+  let closestDiff = Number.POSITIVE_INFINITY;
 
   for (let i = 0; i < data.hourly.time.length; i++) {
     const slotMs = new Date(data.hourly.time[i]).getTime();
@@ -240,23 +254,14 @@ export async function computeRouteWeather(
   departureTime: Date,
   intervalMinutes: number,
 ): Promise<string> {
-  const { steps, totalSeconds, summary } = await fetchRouteSteps(
-    apiKey,
-    origin,
-    destination,
-    mode,
-  );
+  const { steps, totalSeconds, summary } = await fetchRouteSteps(apiKey, origin, destination, mode);
 
   const samplePoints = sampleRoute(steps, totalSeconds, departureTime, intervalMinutes);
 
   // Fetch weather for all points (sequentially to avoid hammering the API)
   const snapshots: WeatherSnapshot[] = [];
   for (const point of samplePoints) {
-    const w = await getWeatherAtPointAndTime(
-      point.lat,
-      point.lng,
-      point.expectedTime,
-    );
+    const w = await getWeatherAtPointAndTime(point.lat, point.lng, point.expectedTime);
     snapshots.push({
       offsetMinutes: point.offsetMinutes,
       timeLabel: formatLocalTime(point.expectedTime),
@@ -270,28 +275,22 @@ export async function computeRouteWeather(
 
   // Format output
   const modeLabel: Record<TravelMode, string> = {
-    DRIVE: "🚗 Auto", WALK: "🚶 Zu Fuß", BICYCLE: "🚲 Fahrrad", TRANSIT: "🚌 ÖPNV",
+    DRIVE: "🚗 Auto",
+    WALK: "🚶 Zu Fuß",
+    BICYCLE: "🚲 Fahrrad",
+    TRANSIT: "🚌 ÖPNV",
   };
   const depLabel = formatLocalTime(departureTime);
 
   const lines = snapshots.map((s) => {
-    const rain =
-      s.precipitationProbability > 20
-        ? `  🌧 ${s.precipitationProbability}%`
-        : "";
+    const rain = s.precipitationProbability > 20 ? `  🌧 ${s.precipitationProbability}%` : "";
     return (
       `${s.timeLabel}  ${s.locationLabel}\n` +
       `  ${s.condition}  ${s.temperature}°C  💨 ${s.windSpeed} km/h${rain}`
     );
   });
 
-  return (
-    `Wetter entlang der Route (${modeLabel[mode]})\n` +
-    `${origin} → ${destination}\n` +
-    `Abfahrt: ${depLabel}  |  ${summary}\n` +
-    `${"─".repeat(40)}\n` +
-    lines.join("\n\n")
-  );
+  return `Wetter entlang der Route (${modeLabel[mode]})\n${origin} → ${destination}\nAbfahrt: ${depLabel}  |  ${summary}\n${"─".repeat(40)}\n${lines.join("\n\n")}`;
 }
 
 function formatLocalTime(date: Date): string {

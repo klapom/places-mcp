@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { searchText, searchNearby, autocomplete, getPlaceDetails } from "./places-client.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { autocomplete, getPlaceDetails, searchNearby, searchText } from "./places-client.js";
 
 const mockFetch = vi.fn();
 
@@ -21,20 +21,24 @@ function errResponse(status: number, body: string) {
 
 describe("searchText", () => {
   it("maps place fields correctly via mapPlace", async () => {
-    mockFetch.mockResolvedValueOnce(okJson({
-      places: [{
-        id: "place123",
-        displayName: { text: "Bäckerei Müller" },
-        formattedAddress: "Hauptstr. 1, Berlin",
-        rating: 4.5,
-        userRatingCount: 120,
-        types: ["bakery", "food"],
-        location: { latitude: 52.52, longitude: 13.405 },
-        currentOpeningHours: { openNow: true },
-        priceLevel: "PRICE_LEVEL_INEXPENSIVE",
-        googleMapsUri: "https://maps.google.com/place123",
-      }],
-    }));
+    mockFetch.mockResolvedValueOnce(
+      okJson({
+        places: [
+          {
+            id: "place123",
+            displayName: { text: "Bäckerei Müller" },
+            formattedAddress: "Hauptstr. 1, Berlin",
+            rating: 4.5,
+            userRatingCount: 120,
+            types: ["bakery", "food"],
+            location: { latitude: 52.52, longitude: 13.405 },
+            currentOpeningHours: { openNow: true },
+            priceLevel: "PRICE_LEVEL_INEXPENSIVE",
+            googleMapsUri: "https://maps.google.com/place123",
+          },
+        ],
+      }),
+    );
 
     const results = await searchText("fake-key", "Bäckerei");
     expect(results).toHaveLength(1);
@@ -61,18 +65,22 @@ describe("searchText", () => {
     ];
 
     for (const [level, label] of priceLevels) {
-      mockFetch.mockResolvedValueOnce(okJson({
-        places: [{ id: "x", displayName: "test", priceLevel: level }],
-      }));
+      mockFetch.mockResolvedValueOnce(
+        okJson({
+          places: [{ id: "x", displayName: "test", priceLevel: level }],
+        }),
+      );
       const results = await searchText("key", "test");
       expect(results[0].priceLevel).toBe(label);
     }
   });
 
   it("handles displayName as plain string", async () => {
-    mockFetch.mockResolvedValueOnce(okJson({
-      places: [{ id: "x", displayName: "Plain Name" }],
-    }));
+    mockFetch.mockResolvedValueOnce(
+      okJson({
+        places: [{ id: "x", displayName: "Plain Name" }],
+      }),
+    );
     const results = await searchText("key", "test");
     expect(results[0].name).toBe("Plain Name");
   });
@@ -117,12 +125,14 @@ describe("searchNearby", () => {
 
 describe("autocomplete", () => {
   it("maps suggestions correctly", async () => {
-    mockFetch.mockResolvedValueOnce(okJson({
-      suggestions: [
-        { placePrediction: { placeId: "p1", text: { text: "Berlin" }, types: ["city"] } },
-        { notAPlace: true },
-      ],
-    }));
+    mockFetch.mockResolvedValueOnce(
+      okJson({
+        suggestions: [
+          { placePrediction: { placeId: "p1", text: { text: "Berlin" }, types: ["city"] } },
+          { notAPlace: true },
+        ],
+      }),
+    );
     const results = await autocomplete("key", "Ber");
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({ placeId: "p1", description: "Berlin", types: ["city"] });

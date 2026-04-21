@@ -1,5 +1,4 @@
-const ROUTES_URL =
-  "https://routes.googleapis.com/directions/v2:computeRoutes";
+const ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes";
 
 const ROUTE_FIELDS = [
   "routes.duration",
@@ -53,10 +52,9 @@ export async function computeRoute(
 
   const durationText =
     route.localizedValues?.duration?.text ??
-    formatSeconds(parseInt(route.duration?.replace("s", "") ?? "0"));
+    formatSeconds(Number.parseInt(route.duration?.replace("s", "") ?? "0"));
   const distanceText =
-    route.localizedValues?.distance?.text ??
-    formatMeters(route.distanceMeters ?? 0);
+    route.localizedValues?.distance?.text ?? formatMeters(route.distanceMeters ?? 0);
 
   // Collect turn-by-turn steps
   const steps: string[] = [];
@@ -76,11 +74,7 @@ export async function computeRoute(
   return { durationText, distanceText, steps, mapsLink };
 }
 
-function buildMapsLink(
-  origin: string,
-  destination: string,
-  mode: TravelMode,
-): string {
+function buildMapsLink(origin: string, destination: string, mode: TravelMode): string {
   const modeMap: Record<TravelMode, string> = {
     DRIVE: "driving",
     WALK: "walking",

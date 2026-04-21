@@ -89,11 +89,7 @@ async function placesPost(
   return res.json();
 }
 
-async function placesGet(
-  apiKey: string,
-  path: string,
-  fields: string,
-): Promise<unknown> {
+async function placesGet(apiKey: string, path: string, fields: string): Promise<unknown> {
   const res = await fetch(`${BASE_URL}/${path}?key=${apiKey}`, {
     headers: { "X-Goog-FieldMask": fields },
   });
@@ -115,7 +111,7 @@ function mapPlace(p: any): PlaceSummary {
     types: p.types ?? [],
     location: p.location,
     openNow: p.currentOpeningHours?.openNow,
-    priceLevel: p.priceLevel ? PRICE_LABELS[p.priceLevel] ?? p.priceLevel : undefined,
+    priceLevel: p.priceLevel ? (PRICE_LABELS[p.priceLevel] ?? p.priceLevel) : undefined,
     phone: p.nationalPhoneNumber,
     website: p.websiteUri,
     googleMapsUri: p.googleMapsUri,
@@ -144,7 +140,7 @@ export async function searchText(
     };
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data = await placesPost(apiKey, "places:searchText", body, LIST_FIELDS) as any;
+  const data = (await placesPost(apiKey, "places:searchText", body, LIST_FIELDS)) as any;
   return (data.places ?? []).map(mapPlace);
 }
 
@@ -166,7 +162,7 @@ export async function searchNearby(
   if (types.length > 0) body.includedTypes = types;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data = await placesPost(apiKey, "places:searchNearby", body, LIST_FIELDS) as any;
+  const data = (await placesPost(apiKey, "places:searchNearby", body, LIST_FIELDS)) as any;
   return (data.places ?? []).map(mapPlace);
 }
 
@@ -174,7 +170,7 @@ export async function getPlaceDetails(
   apiKey: string,
   placeId: string,
   languageCode = "de",
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
   const data = await placesGet(
     apiKey,
@@ -197,7 +193,7 @@ export async function autocomplete(
     };
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data = await placesPost(apiKey, "places:autocomplete", body, "*") as any;
+  const data = (await placesPost(apiKey, "places:autocomplete", body, "*")) as any;
   return (data.suggestions ?? [])
     .filter((s: any) => s.placePrediction)
     .map((s: any) => ({

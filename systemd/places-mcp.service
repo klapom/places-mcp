@@ -1,27 +1,26 @@
 [Unit]
-Description=places-mcp HTTP wrapper (REST 32610 + MCP Streamable-HTTP 33610)
+Description=places-mcp - REST 32610 + MCP Streamable-HTTP 33610
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=/home/admin/projects/places-mcp
-EnvironmentFile=/home/admin/projects/places-mcp/.env
 Environment=NODE_ENV=production
 Environment=LISTEN_PORT=32610
 Environment=MCP_PORT=33610
 Environment=LISTEN_HOST=0.0.0.0
-ExecStart=/usr/bin/node /home/admin/projects/places-mcp/dist/http_server.js
+ExecStart=/usr/bin/node --env-file=.env /home/admin/projects/places-mcp/dist/http_server.js
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=places-mcp-http
+SyslogIdentifier=places-mcp
 
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/home/admin/projects/places-mcp
+ReadWritePaths=/home/admin/projects/places-mcp /home/admin/.places-mcp
 
 [Install]
 WantedBy=default.target
